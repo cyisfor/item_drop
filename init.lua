@@ -1,5 +1,12 @@
+function iprint(...)
+    for i, v in ipairs(arg) do
+        arg[i] = tostring(v)
+    end
+    print('\27[1m[item_drop] '..table.concat(arg, ' '), '\27[m')
+end
+
 -- returns whether the pickup failed or not.
-function pickup(player,inv,object)
+function pickup(player, inv, object)
     if inv and inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring)) then
         inv:add_item("main", ItemStack(object:get_luaentity().itemstring))
         if object:get_luaentity().itemstring ~= "" then
@@ -10,13 +17,14 @@ function pickup(player,inv,object)
         end
         object:get_luaentity().itemstring = ""
         object:remove()
-        return false;
+        return false
     else
-        return true;
+        return true
     end
 end
 
 function isGood(object)
+    -- only want items swooping up after players, not after chests!
     if not object:is_player() and object:get_luaentity() and object:get_luaentity().name == "__builtin:item" then
         return true
     else
@@ -24,15 +32,15 @@ function isGood(object)
     end
 end
 
-function pickupOrStop(object,inv,player)
+function pickupOrStop(object, inv, player)
     local lua = object:get_luaentity()
     if object == nil or lua == nil or lua.itemstring == nil then
         return
     end
-    if pickup(object,inv,player) then
+    if pickup(object, inv, player) then
         -- no pickup, even though it's close, so
         -- stop moving towards the player
-        object:setvelocity({x=0,y=0,z=0})
+        object:setvelocity({x=0, y=0, z=0})
         -- also we can walk on it and it can push pressure plates
         object:get_luaentity().physical_state = true
         object:get_luaentity().object:set_properties({
@@ -41,7 +49,7 @@ function pickupOrStop(object,inv,player)
     end
 end
 
-function moveTowards(object,inv,pos1)
+function moveTowards(object, inv, pos1)
     -- move it towards the player, then pick it up after a delay!
     pos1.y = pos1.y+0.2 -- head towards player's belt
     local pos2 = object:getpos()
@@ -56,32 +64,30 @@ function moveTowards(object,inv,pos1)
         physical = false
     })
 
-    minetest.after(1, function(args)
-        pickupOrStop(object,inv,player);
-    end, {player, inv, object})
+    minetest.after(1, pickupOrStop, object, inv, player)
 end
 
 if minetest.setting_get("enable_item_pickup") then
     minetest.register_globalstep(function(dtime)
-        for _,player in ipairs(minetest.get_connected_players()) do
+        for _, player in ipairs(minetest.get_connected_players()) do
             if player:get_hp() > 0 or not minetest.setting_getbool("enable_damage") then
                 local playerPosition = player:getpos()
                 playerPosition.y = playerPosition.y+0.5
                 local inv = player:get_inventory()
 
-                for _,object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 1)) do
+                for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 1)) do
                     if isGood(object) then
-                        pickup(player,inv,object)
+                        pickup(player, inv, object)
                     end
                 end
 
-                for _,object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 2)) do
+                for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 2)) do
                     if isGood(object) and
                         object:get_luaentity().collect and
                         inv and
                         inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring))
                         then
-                          moveTowards(object,inv,playerPosition);
+                          moveTowards(object, inv, playerPosition)
                     end
                 end
             end
@@ -89,18 +95,23 @@ if minetest.setting_get("enable_item_pickup") then
     end)
 end
 
-function expireLater(expiration,obj)
-    minetest.after(expiration,function(obj)
+function expireLater(expiration, obj)
+    minetest.after(expiration, function(obj)
+        iprint('expiring')
         obj:remove()
     end, obj)
 end
 
+local old_handle_node_drops = minetest.handle_node_drops
+
 function minetest.handle_node_drops(pos, drops, digger)
+    iprint('handling node drops!')
     local inv
+    -- the digger might be a node, like a constructor
     if minetest.setting_getbool("creative_mode") and digger and digger:is_player() then
         inv = digger:get_inventory()
     end
-    for _,item in ipairs(drops) do
+    for _, item in ipairs(drops) do
         local count, name
         if type(item) == "string" then
             count = 1
@@ -111,18 +122,18 @@ function minetest.handle_node_drops(pos, drops, digger)
         end
         -- Only drop the item if not in creative, or if the item is not in creative inventory
         if not inv or not inv:contains_item("main", ItemStack(name)) then
-            for i=1,count do
+            for i=1, count do
                 local obj = minetest.env:add_item(pos, name)
                 if obj ~= nil then
                     -- Set this to make the item move towards the player later
                     local lua = obj:get_luaentity()
                     lua.collect = true
                     local x = math.random(1, 5)
-                    if math.random(1,2) == 1 then
+                    if math.random(1, 2) == 1 then
                         x = -x
                     end
                     local z = math.random(1, 5)
-                    if math.random(1,2) == 1 then
+                    if math.random(1, 2) == 1 then
                         z = -z
                     end
                     -- hurl it out into space at a random velocity
@@ -143,38 +154,45 @@ function minetest.handle_node_drops(pos, drops, digger)
 
                         local expiration = tonumber(minetest.setting_get("remove_items"))
 
+
                         lua.age = minetest.get_gametime()
 
+                        iprint('expiration is', age, '+', expiration)
                         -- if on_activate gets called when the object is first
                         -- spawned, then expireLater would get called twice, if
                         -- we didn't set an alreadyActivated flag.
 
                         obj.on_activate = function(obj, staticdata)
+                            iprint('activating')
                             local lua = obj:get_luaentity()
                             if lua.alreadyActivated then return end
-                            lua.alreadyActivated = true;
-                            local now = minetest.get_gametime();
-                            local age = tonumber(staticdata);
+                            lua.alreadyActivated = true
+                            local now = minetest.get_gametime()
+                            local age = tonumber(staticdata)
                             if now - age > expiration then
                                 obj:remove()
                             else
-                                obj:get_luaentity().age = tonumber(staticdata);
+                                obj:get_luaentity().age = tonumber(staticdata)
                                 -- wait the rest of the time left, then expire
-                                expireLater(obj,expiration-(now-age));
+                                iprint('expiring in', expiration-(now-age))
+                                expireLater(obj, expiration-(now-age))
                             end
                         end
                         obj.get_staticdata = function(obj)
-                            return obj:get_luaentity().age
+                            return tostring(obj:get_luaentity().age)
                         end
-                        lua.alreadyActivated = true;
-                        expireLater(obj,expiration);
+                        lua.alreadyActivated = true
+                        expireLater(obj, expiration)
                     end
                 end
             end
         end
     end
+    return old_handle_node_drops(pos, drops, digger)
 end
 
 if minetest.setting_get("log_mods") then
     minetest.log("action", "item_drop loaded")
 end
+
+iprint('loaded')
