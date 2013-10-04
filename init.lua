@@ -141,48 +141,10 @@ function minetest.handle_node_drops(pos, drops, digger)
                     obj:setvelocity({x=1/x, y=obj:getvelocity().y, z=1/z})
 
                     if minetest.setting_get("remove_items") and tonumber(minetest.setting_get("remove_items")) then
-                        -- we will hold the age as a property of the lua object
-                        -- but that won't last a server restart, or an object unloading.
-                        --
-                        -- By returning the age from get_staticdata, it gets serialized
-                        -- along with the object on disk. The staticdata is provided again
-                        -- during the 'on_activate' event, whether the server restarts
-                        -- or the object unloads.
-                        --
-                        -- In this way we should be able to preserve an object's age
-                        -- so it can expire as soon as it loads, if it's really old.
-
-                        local expiration = tonumber(minetest.setting_get("remove_items"))
-
 
                         lua.age = minetest.get_gametime()
-
-                        iprint('expiration is', age, '+', expiration)
-                        -- if on_activate gets called when the object is first
-                        -- spawned, then expireLater would get called twice, if
-                        -- we didn't set an alreadyActivated flag.
-
-                        obj.on_activate = function(obj, staticdata)
-                            iprint('activating')
-                            local lua = obj:get_luaentity()
-                            if lua.alreadyActivated then return end
-                            lua.alreadyActivated = true
-                            local now = minetest.get_gametime()
-                            local age = tonumber(staticdata)
-                            if now - age > expiration then
-                                obj:remove()
-                            else
-                                obj:get_luaentity().age = tonumber(staticdata)
-                                -- wait the rest of the time left, then expire
-                                iprint('expiring in', expiration-(now-age))
-                                expireLater(obj, expiration-(now-age))
-                            end
-                        end
-                        obj.get_staticdata = function(obj)
-                            return tostring(obj:get_luaentity().age)
-                        end
                         lua.alreadyActivated = true
-                        expireLater(obj, expiration)
+                        expireLater(expiration, obj)
                     end
                 end
             end
@@ -191,8 +153,94 @@ function minetest.handle_node_drops(pos, drops, digger)
     return old_handle_node_drops(pos, drops, digger)
 end
 
+local old_spawn_item = minetest.spawn_item
+
+function minetest.spawn_item(pos, item)
+    local obj = old_spawn_item(pos, item)
+    -- we will hold the age as a property of the lua object
+    -- but that won't last a server restart, or an object unloading.
+    --
+    -- By returning the age from get_staticdata, it gets serialized
+    -- along with the object on disk. The staticdata is provided again
+    -- during the 'on_activate' event, whether the server restarts
+    -- or the object unloads.
+    --
+    -- In this way we should be able to preserve an object's age
+    -- so it can expire as soon as it loads, if it's really old.
+    --
+
+    -- if on_activate gets called when the object is first
+    -- spawned, then expireLater would get called twice, if
+    -- we didn't set an alreadyActivated flag.
+    
+    iprint('spawning an item whee')
+   
+end
+
+
+local itemType = minetest.registered_entities['__builtin:item']
+
+local old_on_activate = itemType.on_activate
+itemType.on_activate = function(obj, staticdata)
+    local info = {}
+    local ret = obj
+    if staticdata then
+        info = minetest.deserialize(staticdata);
+    end
+    if info == nil then
+        error('another module is using staticdata in a way we cannot use! we found '..staticdata)
+    end
+
+    if old_on_activate then
+        if info._hack_other_info then
+            staticdata = info._hack_other_info
+        end
+        ret = old_on_activate(obj,staticdata)            
+    end        
+
+    local expiration = tonumber(minetest.setting_get("remove_items"))
+    -- we'll say 0 means never expire, to not deal with parsing non-numbers :p
+    if expiration == 0 then
+        return
+    end
+
+    if obj.alreadyActivated then return obj end
+    obj.alreadyActivated = true
+    local now = minetest.get_gametime()
+
+    -- all items decay. The ones without an age are assigned the current
+    -- time when discovered. 
+
+    if info.age == nil then
+        obj.age = minetest.get_gametime()
+        expireLater(expiration, obj);
+        return
+    end
+
+    if now - info.age > expiration then
+        obj:remove()
+    else
+        -- wait the rest of the time left, then expire
+        iprint('expiring in', expiration-(now-age))
+        expireLater(expiration-(now-age), obj)
+    end
+end
+local old_get_staticdata = itemType.get_staticdata
+itemType.get_staticdata = function(lua)
+    local info = {}
+    if old_get_staticdata then
+        info = old_get_staticdata(lua)
+    end
+    if type(info)~='table' then
+        info = {_hack_other_info=info}
+    end
+    info.age = lua.age
+    return minetest.serialize(info)
+end
+
+
 if minetest.setting_get("log_mods") then
     minetest.log("action", "item_drop loaded")
 end
 
-iprint('loaded')
+iprint('loaded 0.1')
