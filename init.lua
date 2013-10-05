@@ -69,6 +69,7 @@ end
 
 if minetest.setting_get("enable_item_pickup") then
     minetest.register_globalstep(function(dtime)
+        if not minetest.setting_get("enable_item_pickup") then return end
         for _, player in ipairs(minetest.get_connected_players()) do
             if player:get_hp() > 0 or not minetest.setting_getbool("enable_damage") then
                 local playerPosition = player:getpos()
@@ -97,7 +98,10 @@ end
 
 function expireLater(expiration, obj)
     minetest.after(expiration, function(obj)
-        iprint('expiring')
+        lua = obj:get_luaentity()
+        if lua then
+            iprint('expiring',lua.id)
+        end
         obj:remove()
     end, obj)
 end
@@ -105,7 +109,6 @@ end
 local old_handle_node_drops = minetest.handle_node_drops
 
 function minetest.handle_node_drops(pos, drops, digger)
-    iprint('handling node drops!')
     local inv
     -- the digger might be a node, like a constructor
     if minetest.setting_getbool("creative_mode") and digger and digger:is_player() then
@@ -173,7 +176,7 @@ function minetest.spawn_item(pos, item)
     -- spawned, then expireLater would get called twice, if
     -- we didn't set an alreadyActivated flag.
     
-    iprint('spawning an item whee')
+    iprint('spawning an item whee',obj:get_luaentity().id)
    
 end
 
@@ -181,22 +184,23 @@ end
 local itemType = minetest.registered_entities['__builtin:item']
 
 local old_on_activate = itemType.on_activate
-itemType.on_activate = function(obj, staticdata)
+itemType.on_activate = function(lua, staticdata)
+    -- XXX: make obj the actual userdata entity!
     local info = {}
-    local ret = obj
     if staticdata then
         info = minetest.deserialize(staticdata);
     end
     if info == nil then
-        error('another module is using staticdata in a way we cannot use! we found '..staticdata)
+        iprint('another module is using staticdata in a way we cannot use! we found '..staticdata)
+        info = {}
     end
-
     if old_on_activate then
         if info._hack_other_info then
             staticdata = info._hack_other_info
         end
-        ret = old_on_activate(obj,staticdata)            
-    end        
+    end 
+    old_on_activate(lua,staticdata)
+    local obj = lua.object
 
     local expiration = tonumber(minetest.setting_get("remove_items"))
     -- we'll say 0 means never expire, to not deal with parsing non-numbers :p
@@ -204,25 +208,29 @@ itemType.on_activate = function(obj, staticdata)
         return
     end
 
-    if obj.alreadyActivated then return obj end
-    obj.alreadyActivated = true
+    if lua.alreadyActivated then return end
+    lua.alreadyActivated = true
     local now = minetest.get_gametime()
 
     -- all items decay. The ones without an age are assigned the current
     -- time when discovered. 
 
     if info.age == nil then
-        obj.age = minetest.get_gametime()
+        lua.age = minetest.get_gametime()
         expireLater(expiration, obj);
         return
     end
 
-    if now - info.age > expiration then
+    lua.age = info.age
+
+    local timeLeft = expiration - (now - info.age)
+
+    if timeLeft <= 0 then
         obj:remove()
     else
         -- wait the rest of the time left, then expire
-        iprint('expiring in', expiration-(now-age))
-        expireLater(expiration-(now-age), obj)
+        iprint('expiring in', timeLeft,obj:get_luaentity().id,info.age,now)
+        expireLater(timeLeft, obj)
     end
 end
 local old_get_staticdata = itemType.get_staticdata
