@@ -1,24 +1,23 @@
 ===ITEM_DROP MOD for MINETEST-C55===
-by PilzAdam
+by PilzAdam and cy
 
 Introduction:
 This mod adds Minecraft like drop/pick up of items to Minetest.
 
-How to install:
-Unzip the archive an place it in minetest-base-directory/mods/minetest/
-if you have a windows client or a linux run-in-place client. If you have
-a linux system-wide instalation place it in ~/.minetest/mods/minetest/.
-If you want to install this mod only in one world create the folder
-worldmods/ in your worlddirectory.
-For further information or help see:
-http://wiki.minetest.com/wiki/Installing_Mods
+Settings:
 
-How to use the mod:
-Just install it an everything works.
+remove_items = integer
+The number of seconds before dropped items expire and are removed.
+1 hour = 3600 seconds
+1 day = 86400 seconds
 
-For developers:
-You dont have to use get_drops() anymore because of changes in the
-builtin files of minetest.
+enable_item_pickup = true/false
+If true then items will automatically zip up into the player like moths to a flame.
+If false you have to focus on the items and click to get them.
+
+enable_item_drops = true/false
+If false, then digging a node will drop the node as an item entity, instead of directly adding the node to the player's inventory.
+If true, it's basically like minecraft.
 
 License:
 Sourcecode: WTFPL (see below)

@@ -67,7 +67,7 @@ function moveTowards(object, inv, pos1)
     minetest.after(1, pickupOrStop, object, inv, player)
 end
 
-if minetest.setting_get("enable_item_pickup") then
+if minetest.setting_get("enable_item_pickup") == "true" then
     minetest.register_globalstep(function(dtime)
         if not minetest.setting_get("enable_item_pickup") then return end
         for _, player in ipairs(minetest.get_connected_players()) do
@@ -102,55 +102,57 @@ function expireLater(expiration, obj)
     end, obj)
 end
 
-local old_handle_node_drops = minetest.handle_node_drops
+if minetest.setting_get("enable_item_drops") == "true" then
+    local old_handle_node_drops = minetest.handle_node_drops
 
-function minetest.handle_node_drops(pos, drops, digger)
-    local inv
-    -- the digger might be a node, like a constructor
-    if minetest.setting_getbool("creative_mode") and digger and digger:is_player() then
-        inv = digger:get_inventory()
-    end
-    for _, item in ipairs(drops) do
-        local count, name
-        if type(item) == "string" then
-            count = 1
-            name = item
-        else
-            count = item:get_count()
-            name = item:get_name()
+    function minetest.handle_node_drops(pos, drops, digger)
+        local inv
+        -- the digger might be a node, like a constructor
+        if minetest.setting_getbool("creative_mode") and digger and digger:is_player() then
+            inv = digger:get_inventory()
         end
-        -- Only drop the item if not in creative, or if the item is not in creative inventory
-        if not inv or not inv:contains_item("main", ItemStack(name)) then
-            for i=1, count do
-                local obj = minetest.env:add_item(pos, name)
-                if obj ~= nil then
-                    -- Set this to make the item move towards the player later
-                    local lua = obj:get_luaentity()
-                    lua.collect = true
-                    local x = math.random(1, 5)
-                    if math.random(1, 2) == 1 then
-                        x = -x
-                    end
-                    local z = math.random(1, 5)
-                    if math.random(1, 2) == 1 then
-                        z = -z
-                    end
-                    -- hurl it out into space at a random velocity
-                    -- (still falling though)
-                    obj:setvelocity({x=1/x, y=obj:getvelocity().y, z=1/z})
+        for _, item in ipairs(drops) do
+            local count, name
+            if type(item) == "string" then
+                count = 1
+                name = item
+            else
+                count = item:get_count()
+                name = item:get_name()
+            end
+            -- Only drop the item if not in creative, or if the item is not in creative inventory
+            if not inv or not inv:contains_item("main", ItemStack(name)) then
+                for i=1, count do
+                    local obj = minetest.env:add_item(pos, name)
+                    if obj ~= nil then
+                        -- Set this to make the item move towards the player later
+                        local lua = obj:get_luaentity()
+                        lua.collect = true
+                        local x = math.random(1, 5)
+                        if math.random(1, 2) == 1 then
+                            x = -x
+                        end
+                        local z = math.random(1, 5)
+                        if math.random(1, 2) == 1 then
+                            z = -z
+                        end
+                        -- hurl it out into space at a random velocity
+                        -- (still falling though)
+                        obj:setvelocity({x=1/x, y=obj:getvelocity().y, z=1/z})
 
-                    if minetest.setting_get("remove_items") and tonumber(minetest.setting_get("remove_items")) then
+                        if minetest.setting_get("remove_items") and tonumber(minetest.setting_get("remove_items")) then
 
-                        lua.age = minetest.get_gametime()
-                        lua.alreadyActivated = true
-                        local expiration = tonumber(minetest.setting_get("remove_items"))
-                        expireLater(expiration, obj)
+                            lua.age = minetest.get_gametime()
+                            lua.alreadyActivated = true
+                            local expiration = tonumber(minetest.setting_get("remove_items"))
+                            expireLater(expiration, obj)
+                        end
                     end
                 end
             end
         end
+        return old_handle_node_drops(pos, drops, digger)
     end
-    return old_handle_node_drops(pos, drops, digger)
 end
 
 -- we will hold the age as a property of the lua object
@@ -235,8 +237,9 @@ itemType.get_staticdata = function(lua)
 end
 
 
-if minetest.setting_get("log_mods") then
-    minetest.log("action", "item_drop loaded")
-end
+-- other mods ignore this, so why shouldn't we?
+-- if minetest.setting_get("log_mods") then
+--    minetest.log("action", "item_drop loaded")
+    iprint('loaded 0.1')
+-- end
 
-iprint('loaded 0.1')
