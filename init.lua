@@ -98,10 +98,6 @@ end
 
 function expireLater(expiration, obj)
     minetest.after(expiration, function(obj)
-        lua = obj:get_luaentity()
-        if lua then
-            iprint('expiring',lua.id)
-        end
         obj:remove()
     end, obj)
 end
@@ -147,6 +143,7 @@ function minetest.handle_node_drops(pos, drops, digger)
 
                         lua.age = minetest.get_gametime()
                         lua.alreadyActivated = true
+                        local expiration = tonumber(minetest.setting_get("remove_items"))
                         expireLater(expiration, obj)
                     end
                 end
@@ -156,42 +153,34 @@ function minetest.handle_node_drops(pos, drops, digger)
     return old_handle_node_drops(pos, drops, digger)
 end
 
-local old_spawn_item = minetest.spawn_item
+-- we will hold the age as a property of the lua object
+-- but that won't last a server restart, or an object unloading.
+--
+-- By returning the age from get_staticdata, it gets serialized
+-- along with the object on disk. The staticdata is provided again
+-- during the 'on_activate' event, whether the server restarts
+-- or the object unloads.
+--
+-- In this way we should be able to preserve an object's age
+-- so it can expire as soon as it loads, if it's really old.
+--
 
-function minetest.spawn_item(pos, item)
-    local obj = old_spawn_item(pos, item)
-    -- we will hold the age as a property of the lua object
-    -- but that won't last a server restart, or an object unloading.
-    --
-    -- By returning the age from get_staticdata, it gets serialized
-    -- along with the object on disk. The staticdata is provided again
-    -- during the 'on_activate' event, whether the server restarts
-    -- or the object unloads.
-    --
-    -- In this way we should be able to preserve an object's age
-    -- so it can expire as soon as it loads, if it's really old.
-    --
+-- if on_activate gets called when the object is first
+-- spawned, then expireLater would get called twice, if
+-- we didn't set an alreadyActivated flag.
 
-    -- if on_activate gets called when the object is first
-    -- spawned, then expireLater would get called twice, if
-    -- we didn't set an alreadyActivated flag.
-    
-    iprint('spawning an item whee',obj:get_luaentity().id)
-   
-end
 
 
 local itemType = minetest.registered_entities['__builtin:item']
 
 local old_on_activate = itemType.on_activate
 itemType.on_activate = function(lua, staticdata)
-    -- XXX: make obj the actual userdata entity!
     local info = {}
-    if staticdata then
-        info = minetest.deserialize(staticdata);
+    if string.len(staticdata)>0 then
+        info = minetest.deserialize(staticdata)
     end
     if info == nil then
-        iprint('another module is using staticdata in a way we cannot use! we found '..staticdata)
+        error('another module is using staticdata in a way we cannot use! we found '..staticdata)
         info = {}
     end
     if old_on_activate then
@@ -229,7 +218,6 @@ itemType.on_activate = function(lua, staticdata)
         obj:remove()
     else
         -- wait the rest of the time left, then expire
-        iprint('expiring in', timeLeft,obj:get_luaentity().id,info.age,now)
         expireLater(timeLeft, obj)
     end
 end
