@@ -1,4 +1,7 @@
 function iprint(...)
+    -- wtf
+    if arg == nil then return end
+
     for i, v in ipairs(arg) do
         arg[i] = tostring(v)
     end
