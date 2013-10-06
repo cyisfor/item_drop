@@ -76,22 +76,24 @@ if minetest.setting_get("enable_item_pickup") == "true" then
         for _, player in ipairs(minetest.get_connected_players()) do
             if player:get_hp() > 0 or not minetest.setting_getbool("enable_damage") then
                 local playerPosition = player:getpos()
-                playerPosition.y = playerPosition.y+0.5
-                local inv = player:get_inventory()
+                if playerPosition ~= nil then 
+                    playerPosition.y = playerPosition.y+0.5
+                    local inv = player:get_inventory()
 
-                for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 1)) do
-                    if isGood(object) then
-                        pickup(player, inv, object)
+                    for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 1)) do
+                        if isGood(object) then
+                            pickup(player, inv, object)
+                        end
                     end
-                end
 
-                for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 2)) do
-                    if isGood(object) and
-                        object:get_luaentity().collect and
-                        inv and
-                        inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring))
-                        then
-                          moveTowards(object, inv, playerPosition)
+                    for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 2)) do
+                        if isGood(object) and
+                            object:get_luaentity().collect and
+                            inv and
+                            inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring))
+                            then
+                              moveTowards(object, inv, playerPosition)
+                        end
                     end
                 end
             end
