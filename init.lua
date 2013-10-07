@@ -10,6 +10,7 @@ end
 
 -- returns whether the pickup failed or not.
 function pickup(player, inv, object)
+    if player == nil then return true end
     if inv and inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring)) then
         inv:add_item("main", ItemStack(object:get_luaentity().itemstring))
         if object:get_luaentity().itemstring ~= "" then
@@ -40,7 +41,7 @@ function pickupOrStop(object, inv, player)
     if object == nil or lua == nil or lua.itemstring == nil then
         return
     end
-    if pickup(object, inv, player) then
+    if pickup(player, inv, object) then
         -- no pickup, even though it's close, so
         -- stop moving towards the player
         object:setvelocity({x=0, y=0, z=0})
@@ -52,14 +53,11 @@ function pickupOrStop(object, inv, player)
     end
 end
 
-function moveTowards(object, inv, pos1)
+function moveTowards(object, inv, player, pos1)
     -- move it towards the player, then pick it up after a delay!
     pos1.y = pos1.y+0.2 -- head towards player's belt
     local pos2 = object:getpos()
     local vec = {x=pos1.x-pos2.x, y=pos1.y-pos2.y, z=pos1.z-pos2.z}
-    vec.x = vec.x*3
-    vec.y = vec.y*3
-    vec.z = vec.z*3
     object:setvelocity(vec)
     -- make sure object doesn't push the player around!
     object:get_luaentity().physical_state = false
@@ -80,19 +78,19 @@ if minetest.setting_get("enable_item_pickup") == "true" then
                     playerPosition.y = playerPosition.y+0.5
                     local inv = player:get_inventory()
 
-                    for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 1)) do
+                    for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 0.5)) do
                         if isGood(object) then
                             pickup(player, inv, object)
                         end
                     end
 
-                    for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 2)) do
+                    for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 3)) do
                         if isGood(object) and
                             object:get_luaentity().collect and
                             inv and
                             inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring))
                             then
-                              moveTowards(object, inv, playerPosition)
+                              moveTowards(object, inv, player, playerPosition)
                         end
                     end
                 end
@@ -110,8 +108,9 @@ end
 if minetest.setting_get("enable_item_drops") == "true" then
     local old_handle_node_drops = minetest.handle_node_drops
 
-    function minetest.handle_node_drops(pos, drops, digger)
+    function new_handle_node_drops(pos, drops, digger)
         local inv
+        print('dropping ',drops)
         -- the digger might be a node, like a constructor
         if minetest.setting_getbool("creative_mode") and digger and digger:is_player() then
             inv = digger:get_inventory()
@@ -156,8 +155,20 @@ if minetest.setting_get("enable_item_drops") == "true" then
                 end
             end
         end
-        return old_handle_node_drops(pos, drops, digger)
+        -- the items have been dropped. Don't use builtin/item.lua or it could put the items
+        -- into an inventory! (see quarry)
+        -- return old_handle_node_drops(pos, drops, digger)
     end
+
+    function checkSetting(pos, drops, digger)
+        if minetest.setting_get("enable_item_drops") == "true" then
+            return new_handle_node_drops(pos, drops, digger)
+        else
+            return old_handle_node_drops(pos, drops, digger)
+        end
+    end
+    minetest.handle_node_drops = checkSetting
+
 end
 
 -- we will hold the age as a property of the lua object
