@@ -74,7 +74,7 @@ if minetest.setting_get("enable_item_pickup") == "true" then
         for _, player in ipairs(minetest.get_connected_players()) do
             if player:get_hp() > 0 or not minetest.setting_getbool("enable_damage") then
                 local playerPosition = player:getpos()
-                if playerPosition ~= nil then 
+                if playerPosition ~= nil then
                     playerPosition.y = playerPosition.y+0.5
                     local inv = player:get_inventory()
 
@@ -110,7 +110,6 @@ if minetest.setting_get("enable_item_drops") == "true" then
 
     function new_handle_node_drops(pos, drops, digger)
         local inv
-        print('dropping ',drops)
         -- the digger might be a node, like a constructor
         if minetest.setting_getbool("creative_mode") and digger and digger:is_player() then
             inv = digger:get_inventory()
@@ -205,13 +204,12 @@ itemType.on_activate = function(lua, staticdata)
         if info._hack_other_info then
             staticdata = info._hack_other_info
         end
-    end 
+    end
     old_on_activate(lua,staticdata)
     local obj = lua.object
 
     local expiration = tonumber(minetest.setting_get("remove_items"))
-    -- we'll say 0 means never expire, to not deal with parsing non-numbers :p
-    if expiration == 0 then
+    if expiration == nil then
         return
     end
 
@@ -220,7 +218,7 @@ itemType.on_activate = function(lua, staticdata)
     local now = minetest.get_gametime()
 
     -- all items decay. The ones without an age are assigned the current
-    -- time when discovered. 
+    -- time when discovered.
 
     if info.age == nil then
         lua.age = minetest.get_gametime()
