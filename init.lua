@@ -1,17 +1,35 @@
 function iprint(...)
     -- wtf
-    if arg == nil then return end
+    local thingies = {...}
 
-    for i, v in ipairs(arg) do
-        arg[i] = tostring(v)
+    for i, v in ipairs(thingies) do
+        thingies[i] = tostring(v)
     end
-    print('\27[1m[item_drop] '..table.concat(arg, ' '), '\27[m')
+    print('\27[1m[item_drop] '..table.concat(thingies, ' '), '\27[m')
 end
 
 local movers = {}
 local immune = {}
 
 local removedAlreadyDammit = {}
+
+vector.fixedNormalize = function(v)
+    assert(v)
+    local len = vector.length(v)
+    if len == 0 then
+        -- no length 1 vector will ever equal this
+        return vector.new(0,0,0)
+    else
+        return vector.divide(v, len)
+    end
+end
+
+if not vector.dot then
+    vector.dot = function(p1,p2)
+        return p1.x * p2.x + p1.y * p2.y + p1.z * p2.z
+    end
+end
+
 
 function removeObject(object)
     movers[object] = nil
@@ -21,15 +39,13 @@ function removeObject(object)
 end
 
 -- returns whether the pickup failed or not.
+-- nil pickupRadius means to infinity and beyond
 function pickup(player, inv, object, pickupRadius)
-    if removedAlreadyDammit[object] then error('derp') end
-    if player == nil then return true end
-    local pos = player:getpos()
-    if pos == nil then return true end
-    pos.y = pos.y+0.5 -- head towards player's belt
-    if vector.distance(pos,object:getpos()) > pickupRadius then 
-        return true 
+    if removedAlreadyDammit[object] then
+        -- this gets called after the timeout, as well as when it hits the player
+        return true
     end
+    if player == nil then return true end
 
     -- itemstring is serialized item so includes metadata
     local lua = object:get_luaentity()
@@ -59,26 +75,35 @@ function isGood(object)
     end
 end
 
-function pickupOrStop(object, inv, player, pickupRadius)
+local function stop(object)
+    immune[object] = nil
+    movers[object] = nil
+    -- no pickup, even though it's close, so
+    -- stop moving towards the player
+    object:setvelocity({x=0, y=0, z=0})
+    object:setacceleration({x=0, y=0, z=0})
+    -- also we can walk on it and it can push pressure plates
+    -- physical_state = false means "please make us physical again"
+    local lua = object:get_luaentity()
+    if lua then
+        lua.physical_state = false
+    end
+    --object:set_properties({
+    -- physical = true
+    --})
+end
+
+local function pickupOrStop(object, inv, player, pickupRadius)
     local lua = object:get_luaentity()
     if object == nil or lua == nil or lua.itemstring == nil then
         return
-    end    
+    end
     if pickup(player, inv, object, pickupRadius) then
-        immune[object] = nil
-        -- no pickup, even though it's close, so
-        -- stop moving towards the player
-        object:setvelocity({x=0, y=0, z=0})
-        -- also we can walk on it and it can push pressure plates
-        -- physical_state = false means "please make us physical again"
-        object:get_luaentity().physical_state = false
-        object:get_luaentity().object:set_properties({
-            physical = true
-        })
+        stop(object)
     end
 end
 
-function moveTowards(object, player, pickupRadius)
+function moveTowards(object, player, pickupRadius, attractRadius)
     -- move it towards the player, then pick it up after a delay!
     local pos1 = player:getpos()
     if pos1 == nil then return end
@@ -93,36 +118,54 @@ function moveTowards(object, player, pickupRadius)
     -- G = whatever it takes for stuff to orbit around the player
     -- and the weight of the player is ^^^
     -- A1 = C / R^2
-    -- inverse effect when R is small!
-    local A
-    if R < pickupRadius * 3 then
-        A = (R/5)^2
-    else
-        A = 1 / (R/5)^2
-        A = math.max(A,2)
+    v = object:getvelocity()
+    stopped = v.x == 0 and v.y == 0 and v.z == 0
+    -- when direction(X) = direction(V) we passed the player
+    -- so project V onto X. If same, passed. If not, approaching.
+    -- projection = norm(X) * (length(V) * cos(theta))
+    -- => length(V) * dot(V,X) / length(V) / length(X)
+    -- = dot(V,X) / length(X)
+    -- if X is normalized, length(X) == 1 so... dot product!
+    -- sign(dot) > 0 = same direction sign(dot)< 0 = different
+    direct = vector.fixedNormalize(direct)
+
+    -- idea, set velocity not acceleration but set it
+    -- not to velocity + acceleration, but to the projection of that
+    -- onto the direction vector. object will always have velocity towards YOU
+
+    if R > attractRadius then
+        stop(object)
+        return
     end
-    object:setacceleration(vector.multiply(vector.normalize(direct),A))
-    -- make sure object doesn't push the player around!
-    object:get_luaentity().physical_state = true
-    object:get_luaentity().object:set_properties({
-        physical = false,
-        collide_with_objects = false,
-        weight = 0
-    })
+    if R < pickupRadius or (not stopped and vector.dot(v,direct) < 0) then
+        print("R is not greater than a",R,attractRadius)
+        pickupOrStop(object,player:get_inventory(),player,nil)
+        return
+    end
+    local A
+    A = 1 / R^2
+    A = math.max(A,2)
+    object:setacceleration(vector.multiply(direct,A))
 end
 
+
 if minetest.setting_get("enable_item_pickup") == "true" then
+    local tickets = 0 -- XXX: oy vey
     moveDelay = 0
     minetest.register_globalstep(function(dtime)
         if not minetest.setting_get("enable_item_pickup") then return end
         moveDelay = moveDelay + dtime
         local pickupRadius = tonumber(minetest.setting_get("pickup_radius"))
+        local attractRadius = tonumber(minetest.setting_get("attract_radius"))
         if not pickupRadius then pickupRadius = 0.5 end
-        if moveDelay > 0.1 then 
+        if not attractRadius then attractRadius = 3 end
+
+        if moveDelay > 0.1 then
             moveDelay = 0
             -- correct your trajectory while moving
-            for object,player in pairs(movers) do
-                moveTowards(object,player,pickupRadius)
+            for object,pair in pairs(movers) do
+                local player = pair[1]
+                moveTowards(object,player,pickupRadius,attractRadius)
             end
         end
         for _, player in ipairs(minetest.get_connected_players()) do
@@ -132,22 +175,32 @@ if minetest.setting_get("enable_item_pickup") == "true" then
                     playerPosition.y = playerPosition.y+0.5
                     local inv = player:get_inventory()
 
-                    for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 0.5)) do
-                        if not (immune[object] or movers[object]) and isGood(object) then
-                            pickup(player, inv, object, pickupRadius)
-                        end
-                    end
-
-                    local attractRadius = tonumber(minetest.setting_get("attract_radius"))
-
                     for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 3)) do
                         if not immune[object] and isGood(object) and
                             inv and
                             inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring))
                             then
-                                movers[object] = player
-                                moveTowards(object, player, pickupRadius)
-                                minetest.after(30, pickupOrStop, object, inv, player, pickupRadius)
+                                local ticket = tickets
+                                movers[object] = {player,ticket}
+                                tickets = tickets + 1
+                                moveTowards(object, player, pickupRadius, attractRadius)
+                                -- make sure object doesn't push the player around!
+                                object:get_luaentity().physical_state = true
+                                object:get_luaentity().object:set_properties({
+                                    physical = false,
+                                    collide_with_objects = false,
+                                    weight = 0
+                                })
+                                -- pleeease no immortal orbiting entities
+                                -- unless you want them to be >:)
+                                minetest.after(30, function(object)
+                                    -- only if it's still moving
+                                    -- but what if it started moving a second time?
+                                    pair = movers[object]
+                                    if pair and pair[2] == ticket then
+                                        stop(object)
+                                    end
+                                end, object)
                         end
                     end
                 end
@@ -313,9 +366,9 @@ if minetest.setting_get("enable_item_pickup") == "true" then
                 local obj = minetest.add_item(p, itemstack)
                 if obj then
                         immune[obj] = true
-                        minetest.after(1, function(obj) 
-                            immune[obj] = nil 
-                        end, obj) 
+                        minetest.after(1, function(obj)
+                            immune[obj] = nil
+                        end, obj)
                         v.x = v.x*2
                         v.y = v.y*2 + 1
                         v.z = v.z*2
@@ -325,7 +378,7 @@ if minetest.setting_get("enable_item_pickup") == "true" then
                 minetest.add_item(pos, itemstack)
         end
         return ItemStack("")
-    end        
+    end
 end
 
 
