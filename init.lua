@@ -8,19 +8,42 @@ function iprint(...)
     print('\27[1m[item_drop] '..table.concat(arg, ' '), '\27[m')
 end
 
+local movers = {}
+local immune = {}
+
+local removedAlreadyDammit = {}
+
+function removeObject(object)
+    movers[object] = nil
+    immune[object] = nil
+    removedAlreadyDammit[object] = true
+    object:remove()
+end
+
 -- returns whether the pickup failed or not.
-function pickup(player, inv, object)
+function pickup(player, inv, object, pickupRadius)
+    if removedAlreadyDammit[object] then error('derp') end
     if player == nil then return true end
-    if inv and inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring)) then
-        inv:add_item("main", ItemStack(object:get_luaentity().itemstring))
+    local pos = player:getpos()
+    if pos == nil then return true end
+    pos.y = pos.y+0.5 -- head towards player's belt
+    if vector.distance(pos,object:getpos()) > pickupRadius then 
+        return true 
+    end
+
+    -- itemstring is serialized item so includes metadata
+    local lua = object:get_luaentity()
+    item = ItemStack(lua.itemstring)
+    if inv and inv:room_for_item("main", item) then
+        inv:add_item("main", item)
         if object:get_luaentity().itemstring ~= "" then
             minetest.sound_play("item_drop_pickup", {
                 to_player = player:get_player_name(),
                 gain = 0.4,
             })
         end
-        object:get_luaentity().itemstring = ""
-        object:remove()
+        -- lua.itemstring = ""
+        removeObject(object)
         return false
     else
         return true
@@ -36,41 +59,72 @@ function isGood(object)
     end
 end
 
-function pickupOrStop(object, inv, player)
+function pickupOrStop(object, inv, player, pickupRadius)
     local lua = object:get_luaentity()
     if object == nil or lua == nil or lua.itemstring == nil then
         return
-    end
-    if pickup(player, inv, object) then
+    end    
+    if pickup(player, inv, object, pickupRadius) then
+        immune[object] = nil
         -- no pickup, even though it's close, so
         -- stop moving towards the player
         object:setvelocity({x=0, y=0, z=0})
         -- also we can walk on it and it can push pressure plates
-        object:get_luaentity().physical_state = true
+        -- physical_state = false means "please make us physical again"
+        object:get_luaentity().physical_state = false
         object:get_luaentity().object:set_properties({
             physical = true
         })
     end
 end
 
-function moveTowards(object, inv, player, pos1)
+function moveTowards(object, player, pickupRadius)
     -- move it towards the player, then pick it up after a delay!
-    pos1.y = pos1.y+0.2 -- head towards player's belt
+    local pos1 = player:getpos()
+    if pos1 == nil then return end
     local pos2 = object:getpos()
-    local vec = {x=pos1.x-pos2.x, y=pos1.y-pos2.y, z=pos1.z-pos2.z}
-    object:setvelocity(vec)
+    if pos2 == nil then return end
+    pos1.y = pos1.y+0.5 -- head towards player's belt
+    local direct = vector.subtract(pos1, pos2)
+    local R = vector.length(direct)
+    -- Fg = G*M1*M2/R^2
+    -- M1*A1 = G * M1 * M2 / R^2
+    -- A1 = G * M2 / R ^2
+    -- G = whatever it takes for stuff to orbit around the player
+    -- and the weight of the player is ^^^
+    -- A1 = C / R^2
+    -- inverse effect when R is small!
+    local A
+    if R < pickupRadius * 3 then
+        A = (R/5)^2
+    else
+        A = 1 / (R/5)^2
+        A = math.max(A,2)
+    end
+    object:setacceleration(vector.multiply(vector.normalize(direct),A))
     -- make sure object doesn't push the player around!
-    object:get_luaentity().physical_state = false
+    object:get_luaentity().physical_state = true
     object:get_luaentity().object:set_properties({
-        physical = false
+        physical = false,
+        collide_with_objects = false,
+        weight = 0
     })
-
-    minetest.after(1, pickupOrStop, object, inv, player)
 end
 
 if minetest.setting_get("enable_item_pickup") == "true" then
+    moveDelay = 0
     minetest.register_globalstep(function(dtime)
         if not minetest.setting_get("enable_item_pickup") then return end
+        moveDelay = moveDelay + dtime
+        local pickupRadius = tonumber(minetest.setting_get("pickup_radius"))
+        if not pickupRadius then pickupRadius = 0.5 end
+        if moveDelay > 0.1 then 
+            moveDelay = 0
+            -- correct your trajectory while moving
+            for object,player in pairs(movers) do
+                moveTowards(object,player,pickupRadius)
+            end
+        end
         for _, player in ipairs(minetest.get_connected_players()) do
             if player:get_hp() > 0 or not minetest.setting_getbool("enable_damage") then
                 local playerPosition = player:getpos()
@@ -79,18 +133,21 @@ if minetest.setting_get("enable_item_pickup") == "true" then
                     local inv = player:get_inventory()
 
                     for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 0.5)) do
-                        if isGood(object) then
-                            pickup(player, inv, object)
+                        if not (immune[object] or movers[object]) and isGood(object) then
+                            pickup(player, inv, object, pickupRadius)
                         end
                     end
 
+                    local attractRadius = tonumber(minetest.setting_get("attract_radius"))
+
                     for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 3)) do
-                        if isGood(object) and
-                            object:get_luaentity().collect and
+                        if not immune[object] and isGood(object) and
                             inv and
                             inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring))
                             then
-                              moveTowards(object, inv, player, playerPosition)
+                                movers[object] = player
+                                moveTowards(object, player, pickupRadius)
+                                minetest.after(30, pickupOrStop, object, inv, player, pickupRadius)
                         end
                     end
                 end
@@ -100,9 +157,7 @@ if minetest.setting_get("enable_item_pickup") == "true" then
 end
 
 function expireLater(expiration, obj)
-    minetest.after(expiration, function(obj)
-        obj:remove()
-    end, obj)
+    minetest.after(expiration, removeObject, obj)
 end
 
 if minetest.setting_get("enable_item_drops") == "true" then
@@ -126,11 +181,8 @@ if minetest.setting_get("enable_item_drops") == "true" then
             -- Only drop the item if not in creative, or if the item is not in creative inventory
             if not inv or not inv:contains_item("main", ItemStack(name)) then
                 for i=1, count do
-                    local obj = minetest.env:add_item(pos, name)
+                    local obj = minetest.env:add_item(pos, item)
                     if obj ~= nil then
-                        -- Set this to make the item move towards the player later
-                        local lua = obj:get_luaentity()
-                        lua.collect = true
                         local x = math.random(1, 5)
                         if math.random(1, 2) == 1 then
                             x = -x
@@ -145,6 +197,7 @@ if minetest.setting_get("enable_item_drops") == "true" then
 
                         if minetest.setting_get("remove_items") and tonumber(minetest.setting_get("remove_items")) then
 
+                            local lua = obj:get_luaentity()
                             lua.age = minetest.get_gametime()
                             lua.alreadyActivated = true
                             local expiration = tonumber(minetest.setting_get("remove_items"))
@@ -231,7 +284,7 @@ itemType.on_activate = function(lua, staticdata)
     local timeLeft = expiration - (now - info.age)
 
     if timeLeft <= 0 then
-        obj:remove()
+        removeObject(obj)
     else
         -- wait the rest of the time left, then expire
         expireLater(timeLeft, obj)
@@ -248,6 +301,31 @@ itemType.get_staticdata = function(lua)
     end
     info.age = lua.age
     return minetest.serialize(info)
+end
+
+if minetest.setting_get("enable_item_pickup") == "true" then
+    -- anyone who has ideas how not to completely replace minetest.item_drop let me know
+    -- the existing one doesn't have the hooks!
+    minetest.item_drop = function(itemstack, dropper, pos)
+        if dropper.get_player_name then
+                local v = dropper:get_look_dir()
+                local p = {x=pos.x+v.x, y=pos.y+1.5+v.y, z=pos.z+v.z}
+                local obj = minetest.add_item(p, itemstack)
+                if obj then
+                        immune[obj] = true
+                        minetest.after(1, function(obj) 
+                            immune[obj] = nil 
+                        end, obj) 
+                        v.x = v.x*2
+                        v.y = v.y*2 + 1
+                        v.z = v.z*2
+                        obj:setvelocity(v)
+                end
+        else
+                minetest.add_item(pos, itemstack)
+        end
+        return ItemStack("")
+    end        
 end
 
 
