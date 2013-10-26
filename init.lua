@@ -1,4 +1,8 @@
-function iprint(...)
+if drops == nil then
+    drops = {}
+end
+
+local function iprint(...)
     -- wtf
     local thingies = {...}
 
@@ -31,7 +35,7 @@ if not vector.dot then
 end
 
 
-function removeObject(object)
+local function removeObject(object)
     movers[object] = nil
     immune[object] = nil
     removedAlreadyDammit[object] = true
@@ -40,7 +44,7 @@ end
 
 -- returns whether the pickup failed or not.
 -- nil pickupRadius means to infinity and beyond
-function pickup(player, inv, object, pickupRadius)
+local function pickup(player, inv, object, pickupRadius)
     if removedAlreadyDammit[object] then
         -- this gets called after the timeout, as well as when it hits the player
         return true
@@ -66,7 +70,7 @@ function pickup(player, inv, object, pickupRadius)
     end
 end
 
-function isGood(object)
+local function isGood(object)
     -- only want items swooping up after players, not after chests!
     if not object:is_player() and object:get_luaentity() and object:get_luaentity().name == "__builtin:item" then
         return true
@@ -103,7 +107,15 @@ local function pickupOrStop(object, inv, player, pickupRadius)
     end
 end
 
-function moveTowards(object, player, pickupRadius, attractRadius)
+-- GMass... it's the player's mass if the player were a giant planetlike object
+-- which things orbit around
+-- in the following units:
+-- if G = 6.67×10−11 then
+-- GMass = 1 for 14,992,503,748 kilograms
+drops.playerGMass = 1.7
+-- the player is faaaaaaaat
+
+local function moveTowards(object, player, pickupRadius, attractRadius)
     -- move it towards the player, then pick it up after a delay!
     local pos1 = player:getpos()
     if pos1 == nil then return end
@@ -112,12 +124,6 @@ function moveTowards(object, player, pickupRadius, attractRadius)
     pos1.y = pos1.y+0.5 -- head towards player's belt
     local direct = vector.subtract(pos1, pos2)
     local R = vector.length(direct)
-    -- Fg = G*M1*M2/R^2
-    -- M1*A1 = G * M1 * M2 / R^2
-    -- A1 = G * M2 / R ^2
-    -- G = whatever it takes for stuff to orbit around the player
-    -- and the weight of the player is ^^^
-    -- A1 = C / R^2
     v = object:getvelocity()
     stopped = v.x == 0 and v.y == 0 and v.z == 0
     -- when direction(X) = direction(V) we passed the player
@@ -138,13 +144,18 @@ function moveTowards(object, player, pickupRadius, attractRadius)
         return
     end
     if R < pickupRadius or (not stopped and vector.dot(v,direct) < 0) then
-        print("R is not greater than a",R,attractRadius)
         pickupOrStop(object,player:get_inventory(),player,nil)
         return
     end
+    -- Fg = G*M1*M2/R^2
+    -- M1*A1 = G * M1 * M2 / R^2
+    -- A1 = G * M2 / R ^2
+    -- G = whatever it takes for stuff to orbit around the player
+    -- and the weight of the player is ^^^
+    -- A1 = C / R^2    
     local A
-    A = 1 / R^2
-    A = math.max(A,2)
+    A = drops.playerGMass / R^2
+    A = math.max(A,2*drops.playerGMass)
     object:setacceleration(vector.multiply(direct,A))
 end
 
@@ -153,6 +164,7 @@ if minetest.setting_get("enable_item_pickup") == "true" then
     local tickets = 0 -- XXX: oy vey
     moveDelay = 0
     minetest.register_globalstep(function(dtime)
+        -- it's much more efficient to just restart... no way to unregister_globalstep right?
         if not minetest.setting_get("enable_item_pickup") then return end
         moveDelay = moveDelay + dtime
         local pickupRadius = tonumber(minetest.setting_get("pickup_radius"))
@@ -359,6 +371,7 @@ end
 if minetest.setting_get("enable_item_pickup") == "true" then
     -- anyone who has ideas how not to completely replace minetest.item_drop let me know
     -- the existing one doesn't have the hooks!
+    -- the 'immune' is needed so you don't pickup items you drop before they even appear
     minetest.item_drop = function(itemstack, dropper, pos)
         if dropper.get_player_name then
                 local v = dropper:get_look_dir()
