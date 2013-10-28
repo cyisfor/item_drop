@@ -188,7 +188,8 @@ if minetest.setting_get("enable_item_pickup") == "true" then
                     local inv = player:get_inventory()
 
                     for _, object in ipairs(minetest.env:get_objects_inside_radius(playerPosition, 3)) do
-                        if not immune[object] and isGood(object) and
+                        if (immune[object] == nil or immune[object] ~= player:get_player_name()) and 
+                            isGood(object) and
                             inv and
                             inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring))
                             then
@@ -378,8 +379,8 @@ if minetest.setting_get("enable_item_pickup") == "true" then
                 local p = {x=pos.x+v.x, y=pos.y+1.5+v.y, z=pos.z+v.z}
                 local obj = minetest.add_item(p, itemstack)
                 if obj then
-                        immune[obj] = true
-                        minetest.after(1, function(obj)
+                        immune[obj] = dropper:get_player_name()
+                        minetest.after(math.random(3,5), function(obj)
                             immune[obj] = nil
                         end, obj)
                         v.x = v.x*2
