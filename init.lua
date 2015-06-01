@@ -158,21 +158,30 @@ local function moveTowards(object, player, pickupRadius, attractRadius)
     object:setacceleration(vector.multiply(direct,A))
 end
 
-local function toggler(t,name,new)
+local function toggler(t,name,new,passOld)
    local old = t[name]
-   return function(enable)
-      if enable then
-         t[name] = new
-      else
-         t[name] = old
+   if passOld then
+      local oldnew = new
+      new = function(...)
+         return oldnew(old,...)
       end
    end
+   return setmetatable({old=old},
+      {
+         __call = function(enable)
+            if enable then
+               t[name] = new
+            else
+               t[name] = old
+            end
+         end
+   })
 end
 
 function setupItemPickup()
    local tickets = 0 -- XXX: oy vey
-   moveDelay = 0
-   function pickupItem(dtime)
+   local moveDelay = 0
+   local function pickupItem(dtime)
          moveDelay = moveDelay + dtime
          local pickupRadius = tonumber(core.setting_get("pickup_radius"))
          local attractRadius = tonumber(core.setting_get("attract_radius"))
@@ -245,7 +254,7 @@ end
 
 drops.enableItemDrop = toggler(
    core,'handle_node_drops',
-   function new_handle_node_drops(pos, drops, digger)
+   function (pos, drops, digger)
         local inv
         -- the digger might be a node, like a constructor
         if core.setting_getbool("creative_mode") and digger and digger:is_player() then
@@ -292,8 +301,7 @@ drops.enableItemDrop = toggler(
         -- the items have been dropped. Don't use builtin/item.lua or it could put the items
         -- into an inventory! (see quarry)
         -- return handle_node_drops.old(pos, drops, digger)
-    end
-end
+end)
 
 -- we will hold the age as a property of the lua object
 -- but that won't last a server restart, or an object unloading.
@@ -317,7 +325,7 @@ drops.enableItemDecay =
    (function()
          local activate = toggler(
             itemType,'on_activate',
-            function new_on_activate(lua, staticdata, dtime_s)
+            function (old, lua, staticdata, dtime_s)
                local info = {}
                if string.len(staticdata)>0 then
                   info = core.deserialize(staticdata)
@@ -326,12 +334,12 @@ drops.enableItemDecay =
                   error('another module is using staticdata in a way we cannot use! we found '..staticdata)
                   info = {}
                end
-               if old_on_activate then
+               if old then
                   if info._hack_other_info then
                      staticdata = info._hack_other_info
                   end
+                  old(lua,staticdata, dtime_s)
                end
-               on_activate.old(lua,staticdata, dtime_s)
                local obj = lua.object
 
                local expiration = tonumber(core.setting_get("remove_items"))
@@ -362,27 +370,27 @@ drops.enableItemDecay =
                   -- wait the rest of the time left, then expire
                   expireLater(timeLeft, obj)
                end
-         end)
+         end,true)
          local getstatic = toggler(
             itemType,'get_staticdata',
-            function(lua)                            
+            function(old,lua)                            
                local info = {}
-               if getstatic.old then
-                  info = getstatic.old(lua)
+               if old then
+                  info = old(lua)
                end
                if type(info)~='table' then
                   info = {_hack_other_info=info}
                end
                info.age = lua.age
                return core.serialize(info)
-         end)
+         end,true)
          -- anyone who has ideas how not to completely replace core.item_drop let me know
          -- the existing one doesn't have the hooks!
          -- the 'immune' is needed so you don't pickup items you drop before they even appear
          
          local itemdrop = toggler(
             core,'item_drop',
-            function new_item_drop(itemstack, dropper, pos)
+            function (itemstack, dropper, pos)
                if dropper.get_player_name then
                   local v = dropper:get_look_dir()
                   local p = {x=pos.x+v.x, y=pos.y+1.5+v.y, z=pos.z+v.z}
@@ -411,6 +419,12 @@ drops.enableItemDecay =
 
 local modes = {}
 
+if string.title == nil then
+   string.title = function(s)
+      return s:sub(1,1):upper() .. s:sub(2)
+   end
+end
+
 function setupSetting(name,default)
    local setting = 'enable_item_'..name
    local toggler = drops['enableItem'..name:title()]
@@ -428,6 +442,9 @@ function setupSetting(name,default)
       core.setting_save()
       return true
    end
+   if default then
+      toggler(default)
+   end
 end
 
 setupSetting('drop',false)
@@ -435,7 +452,7 @@ setupSetting('pickup',true)
 setupSetting('decay',true)
 
 local pattern = nil
-for n,_ in pairs(modes) do
+for mode,_ in pairs(modes) do
    if pattern == nil then
       pattern = mode
    else
