@@ -391,7 +391,6 @@ drops.enableItemDecay =
          local itemdrop = toggler(
             core,'item_drop',
             function (itemstack, dropper, pos)
-			   print("boop",itemstack:get_name(),pos.x,pos.y,pos.z)
                if dropper and dropper.get_player_name then
                   local v = dropper:get_look_dir()
                   local p = {x=pos.x+v.x, y=pos.y+1.5+v.y, z=pos.z+v.z}
