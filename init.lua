@@ -111,7 +111,7 @@ end
 -- in the following units:
 -- if G = 6.67×10−11 then
 -- GMass = 1 for 14,992,503,748 kilograms
-drops.playerGMass = 1.7
+drops.playerGMass = 5.0
 -- the player is faaaaaaaat
 
 local function moveTowards(object, player, pickupRadius, attractRadius)
@@ -300,7 +300,7 @@ drops.enableItemDrop = toggler(
         end
         -- the items have been dropped. Don't use builtin/item.lua or it could put the items
         -- into an inventory! (see quarry)
-        -- return handle_node_drops.old(pos, drops, digger)
+        -- return old(pos, drops, digger)
 end)
 
 -- we will hold the age as a property of the lua object
@@ -391,7 +391,8 @@ drops.enableItemDecay =
          local itemdrop = toggler(
             core,'item_drop',
             function (itemstack, dropper, pos)
-               if dropper.get_player_name then
+			   print("boop",itemstack:get_name(),pos.x,pos.y,pos.z)
+               if dropper and dropper.get_player_name then
                   local v = dropper:get_look_dir()
                   local p = {x=pos.x+v.x, y=pos.y+1.5+v.y, z=pos.z+v.z}
                   local obj = core.add_item(p, itemstack)
