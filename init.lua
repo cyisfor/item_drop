@@ -34,6 +34,7 @@ if drops == nil then
     drops = {}
 end
 
+
 local function removeObject(object)
     movers[object] = nil
     immune[object] = nil
@@ -52,7 +53,7 @@ local function pickup(player, inv, object, pickupRadius)
 
     -- itemstring is serialized item so includes metadata
     local lua = object:get_luaentity()
-    item = ItemStack(lua.itemstring)
+    local item = ItemStack(lua.itemstring)
     if inv and inv:room_for_item("main", item) then
         inv:add_item("main", item)
         if object:get_luaentity().itemstring ~= "" then
@@ -106,6 +107,24 @@ local function pickupOrStop(object, inv, player, pickupRadius)
     end
 end
 
+-- pleeease no immortal orbiting entities
+-- unless you want them to be >:)
+local function cleanupMovers()
+	 local now = core.get_gametime()
+	 local doomed = {}
+	 for object,info in pairs(movers) do
+			if now - info.started > 3 then
+				 doomed[object] = info
+			end
+	 end
+	 for object,info in pairs(doomed) do
+			pickupOrStop(object, info.inv, info.player, 0)
+			movers[object] = nil
+	 end
+	 core.after(3,cleanupMovers)
+end
+core.after(3,cleanupMovers);
+
 -- GMass... it's the player's mass if the player were a giant planetlike object
 -- which things orbit around
 -- in the following units:
@@ -114,7 +133,7 @@ end
 drops.playerGMass = 5.0
 -- the player is faaaaaaaat
 
-local function moveTowards(object, player, pickupRadius, attractRadius)
+local function moveTowards(object, player, pickupRadius, attractRadius, pickupAnyway)
     -- move it towards the player, then pick it up after a delay!
     local pos1 = player:getpos()
     if pos1 == nil then return end
@@ -123,8 +142,8 @@ local function moveTowards(object, player, pickupRadius, attractRadius)
     pos1.y = pos1.y+0.5 -- head towards player's belt
     local direct = vector.subtract(pos1, pos2)
     local R = vector.length(direct)
-    v = object:getvelocity()
-    stopped = v.x == 0 and v.y == 0 and v.z == 0
+    local v = object:getvelocity()
+    local stopped = v.x == 0 and v.y == 0 and v.z == 0
     -- when direction(X) = direction(V) we passed the player
     -- so project V onto X. If same, passed. If not, approaching.
     -- projection = norm(X) * (length(V) * cos(theta))
@@ -151,7 +170,7 @@ local function moveTowards(object, player, pickupRadius, attractRadius)
     -- A1 = G * M2 / R ^2
     -- G = whatever it takes for stuff to orbit around the player
     -- and the weight of the player is ^^^
-    -- A1 = C / R^2    
+    -- A1 = C / R^2
     local A
     A = drops.playerGMass / R^2
     A = math.max(A,2*drops.playerGMass)
@@ -182,18 +201,18 @@ function setupItemPickup()
    local tickets = 0 -- XXX: oy vey
    local moveDelay = 0
    local function pickupItem(dtime)
+			local pickupAnyway
          moveDelay = moveDelay + dtime
          local pickupRadius = tonumber(core.setting_get("pickup_radius"))
          local attractRadius = tonumber(core.setting_get("attract_radius"))
          if not pickupRadius then pickupRadius = 0.5 end
-         if not attractRadius then attractRadius = 3 end
+         if not attractRadius then attractRadius = 5 end
 
          if moveDelay > 0.1 then
             moveDelay = 0
             -- correct your trajectory while moving
-            for object,pair in pairs(movers) do
-               local player = pair[1]
-               moveTowards(object,player,pickupRadius,attractRadius)
+            for object,info in pairs(movers) do
+               moveTowards(object,info.player,pickupRadius,attractRadius)
             end
          end
          for _, player in ipairs(core.get_connected_players()) do
@@ -203,16 +222,22 @@ function setupItemPickup()
                   playerPosition.y = playerPosition.y+0.5
                   local inv = player:get_inventory()
 
-                  for _, object in ipairs(core.env:get_objects_inside_radius(playerPosition, 3)) do
-                     if (immune[object] == nil or immune[object] ~= player:get_player_name()) and 
+                  for _, object in ipairs(core.env:get_objects_inside_radius(playerPosition, attractRadius)) do
+                     if (immune[object] == nil or immune[object] ~= player:get_player_name()) and
                         isGood(object) and
                         inv and
-                        inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring))
-                     then
+                        inv:room_for_item("main", ItemStack(object:get_luaentity().itemstring)) and
+												movers[object] == nil
+										 then
                         local ticket = tickets
-                        movers[object] = {player,ticket}
+                        movers[object] = {
+													 started=core.get_gametime(),
+													 inv=inv,
+													 player=player,
+													 ticket=ticket}
                         tickets = tickets + 1
-                        moveTowards(object, player, pickupRadius, attractRadius)
+                        moveTowards(object, player,
+																		pickupRadius, attractRadius)
                         -- make sure object doesn't push the player around!
                         object:get_luaentity().physical_state = true
                         object:get_luaentity().object:set_properties({
@@ -220,18 +245,6 @@ function setupItemPickup()
                               collide_with_objects = false,
                               weight = 0
                                                                     })
-                        -- pleeease no immortal orbiting entities
-                        -- unless you want them to be >:)
-                        core.after(
-                           30,
-                           function(object)
-                              -- only if it's still moving
-                              -- but what if it started moving a second time?
-                              pair = movers[object]
-                              if pair and pair[2] == ticket then
-                                 stop(object)
-                              end
-                           end, object)
                      end
                   end
                end
@@ -346,11 +359,11 @@ drops.enableItemDecay =
                if expiration == nil then
                   return
                end
-               
+
                if lua.alreadyActivated then return end
                lua.alreadyActivated = true
                local now = core.get_gametime()
-               
+
                -- all items decay. The ones without an age are assigned the current
                -- time when discovered.
 
@@ -359,11 +372,11 @@ drops.enableItemDecay =
                   expireLater(expiration, obj);
                   return
                end
-               
+
                lua.age = info.age
-               
+
                local timeLeft = expiration - (now - info.age)
-               
+
                if timeLeft <= 0 then
                   removeObject(obj)
                else
@@ -373,7 +386,7 @@ drops.enableItemDecay =
          end,true)
          local getstatic = toggler(
             itemType,'get_staticdata',
-            function(old,lua)                            
+            function(old,lua)
                local info = {}
                if old then
                   info = old(lua)
@@ -387,7 +400,7 @@ drops.enableItemDecay =
          -- anyone who has ideas how not to completely replace core.item_drop let me know
          -- the existing one doesn't have the hooks!
          -- the 'immune' is needed so you don't pickup items you drop before they even appear
-         
+
          local itemdrop = toggler(
             core,'item_drop',
             function (itemstack, dropper, pos)
